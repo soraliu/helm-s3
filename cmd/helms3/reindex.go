@@ -12,8 +12,9 @@ import (
 )
 
 type reindexAction struct {
-	repoName string
-	acl      string
+	repoName   string
+	publishURI string
+	acl        string
 }
 
 func (act reindexAction) Run(ctx context.Context) error {
@@ -29,6 +30,11 @@ func (act reindexAction) Run(ctx context.Context) error {
 	storage := awss3.New(sess)
 
 	items, errs := storage.Traverse(ctx, repoEntry.URL())
+
+	uri := repoEntry.URL
+	if act.publishURI != "" {
+		uri = act.publishURI
+	}
 
 	builtIndex := make(chan helmutil.Index, 1)
 	go func() {
@@ -54,7 +60,7 @@ func (act reindexAction) Run(ctx context.Context) error {
 		return errors.Wrap(err, "get index reader")
 	}
 
-	if err := storage.PutIndex(ctx, repoEntry.URL(), act.acl, r); err != nil {
+	if err := storage.PutIndex(ctx, repoEntry.URL(), act.publishURI, act.acl, r); err != nil {
 		return errors.Wrap(err, "upload index to the repository")
 	}
 

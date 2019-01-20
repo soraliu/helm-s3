@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/pkg/errors"
 
@@ -139,6 +140,18 @@ func (act pushAction) Run(ctx context.Context) error {
 	if err := idx.UnmarshalBinary(b); err != nil {
 		return errors.WithMessage(err, "load index from downloaded file")
 	}
+
+	metadata, err := storage.GetMetadata(ctx, indexURI)
+	if err != nil {
+		return err
+	}
+
+	publishURI := metadata[strings.Title(awss3.MetaPublishURI)]
+	uri := repoEntry.URL
+	if publishURI != "" {
+		uri = publishURI
+	}
+
 	if err := idx.AddOrReplace(chart.Metadata().Value(), fname, repoEntry.URL(), hash); err != nil {
 		return errors.WithMessage(err, "add/replace chart in the index")
 	}
@@ -150,9 +163,15 @@ func (act pushAction) Run(ctx context.Context) error {
 	}
 
 	if !act.dryRun {
-		if err := storage.PutIndex(ctx, repoEntry.URL(), act.acl, idxReader); err != nil {
+		if err := storage.PutIndex(ctx, repoEntry.URL(), publishURI, act.acl, idxReader); err != nil {
 			return errors.WithMessage(err, "upload index to s3")
 		}
+
+		localIndex := &index.Index{IndexFile: cachedIndex}
+		if err := localIndex.AddOrReplace(chart.GetMetadata(), fname, repoEntry.URL, hash); err != nil {
+			return errors.WithMessage(err, "add/replace chart in the index")
+		}
+		localIndex.SortEntries()
 
 		if err := idx.WriteFile(repoEntry.CacheFile(), 0644); err != nil {
 			return errors.WithMessage(err, "update local index")

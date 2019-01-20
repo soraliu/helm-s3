@@ -2,8 +2,11 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"github.com/pkg/errors"
+	"k8s.io/helm/pkg/repo"
 
 	"github.com/hypnoglow/helm-s3/internal/awss3"
 	"github.com/hypnoglow/helm-s3/internal/awsutil"
@@ -57,8 +60,31 @@ func (act deleteAction) Run(ctx context.Context) error {
 		}
 	}
 
-	if err := storage.PutIndex(ctx, repoEntry.URL(), act.acl, idxReader); err != nil {
+	metadata, err := storage.GetMetadata(ctx, indexURI)
+	if err != nil {
+		return err
+	}
+
+	publishURI := metadata[strings.Title(awss3.MetaPublishURI)]
+	uri := fmt.Sprintf("%s/%s-%s.tgz", repoEntry.URL, chartVersion.Metadata.Name, chartVersion.Metadata.Version)
+
+	if err := storage.Delete(ctx, uri); err != nil {
+		return errors.WithMessage(err, "delete chart file from s3")
+	}
+	if err := storage.PutIndex(ctx, repoEntry.URL(), publishURI, act.acl, idxReader); err != nil {
 		return errors.WithMessage(err, "upload new index to s3")
+	}
+
+	localIndexFile, err := repo.LoadIndexFile(repoEntry.Cache)
+	if err != nil {
+		return err
+	}
+
+	localIndex := &index.Index{IndexFile: localIndexFile}
+
+	_, err = localIndex.Delete(act.name, act.version)
+	if err != nil {
+		return errors.WithMessage(err, "delete chart from local index")
 	}
 
 	if err := idx.WriteFile(repoEntry.CacheFile(), 0644); err != nil {
